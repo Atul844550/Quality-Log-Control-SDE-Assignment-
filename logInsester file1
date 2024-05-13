@@ -1,0 +1,89 @@
+import logging
+import json
+import os
+from datetime import datetime
+
+class LogIngestor:
+    def __init__(self, api_name, log_file):
+        self.api_name = api_name
+        self.log_file = log_file
+        self.logger = logging.getLogger(api_name)
+        self.logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+
+    def log(self, level, log_string, metadata=None):
+        log_data = {
+            "level": level,
+            "log_string": log_string,
+            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "metadata": metadata or {"source": self.log_file}
+        }
+        self.logger.log(level, json.dumps(log_data))
+
+class LogQueryInterface:
+    def __init__(self, log_directory):
+        self.log_directory = log_directory
+
+    def search_logs(self, filters):
+        log_files = [f for f in os.listdir(self.log_directory) if f.endswith('.log')]
+        result = []
+        for log_file in log_files:
+            with open(os.path.join(self.log_directory, log_file), 'r') as f:
+                for line in f:
+                    log_data = json.loads(line)
+                    if self._apply_filters(log_data, filters):
+                        result.append(log_data)
+        return result
+
+    def _apply_filters(self, log_data, filters):
+        for key, value in filters.items():
+            if key == 'timestamp':
+                timestamp = datetime.fromisoformat(log_data['timestamp'][:-1]) # Remove 'Z'
+                if not (value[0] <= timestamp <= value[1]):
+                    return False
+            elif key == 'metadata.source':
+                if log_data['metadata']['source'] != value:
+                    return False
+            elif key in log_data and log_data[key] != value:
+                return False
+        return True
+
+# API Integration
+api1 = LogIngestor("API1", "log1.log")
+api2 = LogIngestor("API2", "log2.log")
+# Add more APIs as needed
+
+# Sample Usage
+api1.log(logging.INFO, "This is an informational message from API1.")
+api2.log(logging.ERROR, "Error encountered in API2.", metadata={"source": "api2.log"})
+
+# Query Interface
+query_interface = LogQueryInterface(log_directory="logs")
+
+# Sample Queries
+# Find all logs with the level set to "error".
+error_logs = query_interface.search_logs({'level': logging.ERROR})
+
+# Search for logs with the message containing the term "Failed to connect".
+connection_failure_logs = query_interface.search_logs({'log_string': 'Failed to connect'})
+
+# Filter logs between the timestamp "2023-09-10T00:00:00Z" and "2023-09-15T23:59:59Z".
+start_timestamp = datetime.fromisoformat("2023-09-10T00:00:00")
+end_timestamp = datetime.fromisoformat("2023-09-15T23:59:59")
+logs_within_date_range = query_interface.search_logs({'timestamp': (start_timestamp, end_timestamp)})
+
+# Display search results
+print("Error Logs:")
+for log in error_logs:
+    print(log)
+
+print("\nConnection Failure Logs:")
+for log in connection_failure_logs:
+    print(log)
+
+print("\nLogs within Date Range:")
+for log in logs_within_date_range:
+    print(log)
